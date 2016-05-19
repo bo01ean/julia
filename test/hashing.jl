@@ -59,6 +59,7 @@ end
 # hashing collections (e.g. issue #6870)
 vals = Any[
     [1,2,3,4], [1 3;2 4], Any[1,2,3,4], [1,3,2,4],
+    [1.0, 2.0, 3.0, 4.0], BigInt[1, 2, 3, 4],
     [1,0], [true,false], BitArray([true,false]),
     Set([1,2,3,4]),
     Set([1:10;]),                # these lead to different key orders
@@ -72,12 +73,12 @@ vals = Any[
     [], [1], [2], [1, 1], [1, 2], [1, 3], [2, 2], [1, 2, 2], [1, 3, 3],
     zeros(2, 2), spzeros(2, 2), eye(2, 2), speye(2, 2),
     sparse(ones(2, 2)), ones(2, 2), sparse([0 0; 1 0]), [0 0; 1 0],
-#    [-0. 0; -0. 0.], SparseMatrixCSC(2, 2, [1, 3, 3], [1, 2], [-0., -0.]),
+    [-0. 0; -0. 0.], SparseMatrixCSC(2, 2, [1, 3, 3], [1, 2], [-0., -0.]),
     # issue #16364
     1:4, 1:1:4, 1:-1:0, 1.0:4.0, 1.0:1.0:4.0, linspace(1, 4, 4),
     'a':'e', ['a', 'b', 'c', 'd', 'e'],
     # check that hash is still consistent with heteregeneous arrays for which - is defined
-    # for some pairs and not others (no element must be ignored)
+    # for some pairs and not others
     ["a", "b", 1, 2], ["a", 1, 2], ["a", "b", 2, 2], ["a", "a", 1, 2], ["a", "b", 2, 3]
 ]
 
@@ -86,29 +87,31 @@ for a in vals, b in vals
 end
 
 vals = Any[
-    Int[], Char[], String[],
-    [0], [1], ['a'], ["a"],
-    [0, 1], ['a', 'b'], ["a", "b"],
-    [0, 1, 2], ['a', 'b', 'c'], ["a", "b", "c"],
-    # test various sparsity patterns
-    [0, 0], [0, 0, 0], [0, 1], [1, 0],
-    [0, 0, 1], [0, 1, 0], [1, 0, 0],
+#    Int[], Float64[],
+#    [0], [1], [2],
+    # test various sparsity patterns with repetitions of steps
+#    [0, 0], [0, 0, 0], [0, 1], [1, 0],
+#    [0, 0, 1], [0, 1, 0], [1, 0, 0], [0, 1, 2],
     [0 0; 0 0], [1 0; 0 0], [0 1; 0 0], [0 0; 1 0], [0 0; 0 1],
-    [5 1; 0 0], [1 0; 0 1], [0 2; 3 0], [0 4; 1 2], [4 0; 0 1],
-    [0 0 0; 0 0 0], [1 0 0; 0 0 1], [0 0 2; 3 0 0], [0 0 7; 6 1 2], [4 0 0; 3 0 1]
+    [5 1; 0 0], [1 1; 0 1], [0 2; 3 0], [0 2; 4 6], [4 0; 0 1],
+    [0 0 0; 0 0 0], [1 0 0; 0 0 1], [0 0 2; 3 0 0], [0 0 7; 6 1 2],
+    [4 0 0; 3 0 1], [0 2 4; 6 0 0],
+    # run of equal steps that crosses a zero
+    [0 3 2 1 0 -1], [0 1 0 -1 0]
 ]
 
 for a in vals
     # check that element type does not affect hash
     @test hash(convert(Array{Any}, a)) == hash(a)
     @test hash(convert(Array{supertype(eltype(a))}, a)) == hash(a)
-    @test hash(sparse(a)) == hash(a)
+    @test Base.SparseArrays.hashsp(sparse(a), UInt(0)) == hash(a, UInt(0))
 end
 
 vals = Any[
-    1:0, 1:1, 1:2, 1:3, 1.0:0.0, 1.0:1.0:1.0, 1.0:0.5:3.0,
-    0:-1:1, 0.0:-1.0:1.0, -4:10, 'a':'e', 'b':'a',
-    linspace(1, 1, 1), linspace(1, 10, 3)
+    0.0:0.1:0.3, 0.3:-0.1:0.0,
+    0:-1:1, 0.0:-1.0:1.0, 0.0:1.1:10.0, -4:10,
+    'a':'e', 'b':'a',
+    linspace(1, 1, 1), linspace(0.3, 1.0, 3),  linspace(1, 1.1, 20)
 ]
 
 for a in vals

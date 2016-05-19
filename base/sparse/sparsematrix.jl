@@ -3399,6 +3399,7 @@ end
 
 # End the run and return the current hash
 @inline function hashrun(val, runlength::Int, h::UInt)
+    @show val, runlength
     if runlength == 0
         return h
     elseif runlength > 1
@@ -3410,44 +3411,90 @@ end
 
 # Hash a sequence of zero entries, including the step before the first one
 @inline function hashzeros(val, runlength::Int, h::UInt)
-    runlength == 0 && return h
-    h = hash(zero(val)-val, h)
-    hashrun(zero(val), runlength-1, h)
+    @show "b", val, runlength
+    if !isequal(val, zero(val))
+        runlength == 0 && return h
+        h = hash(zero(val)-val, h)
+        runlength -= 1
+    end
+    hashrun(zero(val), runlength, h)
 end
 
 # hashaa_seed and hashrle_seed are defined in abstractarray.jl
-function hash(A::SparseMatrixCSC{T}, h::UInt) where T
+function hashsp(A::SparseMatrixCSC{T}, h::UInt) where T
     h += Base.hashaa_seed
     sz = size(A)
     h += hash(sz)
 
+    isempty(A) && return h
+
     colptr = A.colptr
     rowval = A.rowval
     nzval = A.nzval
-    lastidx = 0
+    # Always hash the first element separately
+    h = hash(first(A), h)
+    lastidx = 1
     runlength = 0
-    lastrunlength = 0
-    last = zero(T)
-    lastnz = zero(T)
+    nzeros = 0
+    nextrunlength = 0
+    last = first(A)
+    lastnz = last
+    lastlast = zero(T)
     lastdiff = zero(T)
     @inbounds for col = 1:size(A, 2)
         for j = colptr[col]:colptr[col+1]-1
             nz = nzval[j]
-            isequal(nz, zero(T)) && continue
             idx = sub2ind(sz, rowval[j], col)
-            idx != lastidx+1 && (last = 0) # There have been zeros since the previous value
-            diff = nz - last
-            if idx != lastidx+1 || !isequal(diff, lastdiff) # Run is over
-                h = hashrun(lastdiff, runlength, h)         # Hash previous run
-                h = hashzeros(lastnz, idx-lastidx-1, h)     # Hash intervening zeros
+            idx == 1 && continue # First element is hashed separately
+            # Include stored zeros in adjacent series of sparse zeros (if any)
+            if isequal(lastdiff, zero(T)) && isequal(nz, zero(T))
+                nzeros += 1
+                lastlast = last
+                last = zero(T)
+                idx = lastidx
+                continue
+            end
+            if idx-lastidx > 1 # Two or more zeros since the previous value
+                last = zero(T)
+                nzeros += idx-lastidx-1
+                diff = nz - zero(T)
+
+                if idx-lastidx == 2 # Single zeros must be handled as a nonzero values when step doesn't change
+                    #diff = nz - zero(T)
+                    if isequal(nz - zero(T), zero(T) - lastnz)
+                        #nz = zero(T)
+                        #idx -= 1
+    #                    lastdiff = lastlast-last
+                        nextrunlength = 1
+                        nzeros = 0
+                    # else
+                    #    nzeros += 1
+                    end
+                    # TODO: hash isolated 0 if not equal
+                    # possible hack: compute next diff to see whether it will be part of a run or not
+            end
+            else # Adjacent nonzeros
+                diff = nz - last
+            end
+            @show col, j, nz, last, diff, lastdiff, idx, lastidx, nzeros
+            if !isequal(diff, lastdiff) # Hash previous run
+                h = hashrun(lastdiff, runlength, h)
                 runlength = 1
             else
                 runlength += 1
             end
+
+            if nzeros > 0 # Hash intervening zeros
+                h = hashzeros(lastnz, nzeros, h)
+                nzeros = 0
+            end
             lastidx = idx
+            lastlast = last
             last = nz
             lastnz = nz
             lastdiff = diff
+            runlength += nextrunlength
+            nextrunlength = 0
         end
     end
     h = hashrun(lastdiff, runlength, h)    # Hash previous run

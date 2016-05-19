@@ -63,69 +63,9 @@ end
 
 hash(x::QuoteNode, h::UInt) = hash(x.value, hash(QuoteNode, h))
 
-## hashing collections ##
-
-const hashaa_seed = UInt === UInt64 ? 0x7f53e68ceb575e76 : 0xeb575e76
-const hashrle_seed = UInt == UInt64 ? 0x2aab8909bfea414c : 0xbfea414c
-function hash{T}(a::AbstractArray{T}, h::UInt)
-    if isleaftype(T)
-        if method_exists(-, (T, T))
-            val = (x1, x2) -> x2 - x1
-        else
-            val = (x1, x2) -> x2
-        end
-    else
-        val = (x1, x2) -> applicable(-, x2, x1) ? x2 - x1 : x2
-    end
-
-    _hash(a, h, val)
-end
-
-function _hash{T}(a::AbstractArray{T}, h::UInt, val::Function)
-    h += hashaa_seed
-    h += hash(size(a))
-
-    state = start(a)
-    done(a, state) && return h
-    x1, state = next(a, state)
-    # Always hash the first element
-    h = hash(x1, h)
-    done(a, state) && return h
-
-    # Then hash the difference between two subsequent elements when - is supported,
-    # or the elements themselves when not
-    x2, state = next(a, state)
-    v2 = val(x1, x2)
-    done(a, state) && return hash(v2, h)
-
-    v1 = v2
-    while !done(a, state)
-        x1 = x2
-        x2, state = next(a, state)
-        v1 = v2
-        v2 = val(x1, x2)
-        if isequal(v2, v1)
-            # For repeated elements, use run length encoding
-            # This allows efficient hashing of sparse arrays
-            runlength = 2
-            while !done(a, state)
-                x1 = x2
-                x2, state = next(a, state)
-                v2 = val(x1, x2)
-                isequal(v1, v2) || break
-                runlength += 1
-            end
-            h += hashrle_seed
-            h = hash(runlength, h)
-        end
-        h = hash(v1, h)
-    end
-    !isequal(v2, v1) && (h = hash(v2, h))
-    return h
-end
-
-# hashaa_seed and hashrle_seed are defined in abstractarray.jl
-function hash(r::Range, h::UInt)
+# Efficient O(1) method equivalent to the O(N) AbstractArray fallback,
+# which works only for ranges without rounding error
+function hash_range(r::Range, h::UInt)
     h += hashaa_seed
     h += hash(size(r))
 
